@@ -5,23 +5,14 @@ import {
   ISecrets,
 } from "@blockflow-labs/utils";
 
+import { Stats } from "../utils/tracking";
+import { domainToChainId } from "../utils/helper";
 import {
   burnTransactionsTable,
   IburnTransactionsTable,
-  cctpDayDataDB,
-  cctpWeekDataDB,
-  cctpMonthDataDB,
-  cctpYearDataDB,
-  cctpAllTimeDB,
+  ImintTransactionsTable,
+  mintTransactionsTable,
 } from "../types/schema";
-import { chainIdToDomain, domainToChainId } from "../utils/helper";
-import {
-  updateMonthlyData,
-  updateDailyData,
-  updateYearlyData,
-  updateWeeklyData,
-  updateAllTimeData,
-} from "../utils/tracking";
 
 /**
  * @dev Event::DepositForBurn(uint64 nonce, address burnToken, uint256 amount, address depositor, bytes32 mintRecipient, uint32 destinationDomain, bytes32 destinationTokenMessenger, bytes32 destinationCaller)
@@ -52,22 +43,6 @@ export const DepositForBurnHandler = async (
     `${nonce.toString()}_${block.chain_id}_${dstChainId}`.toLowerCase();
 
   const burntransactionDB: Instance = bind(burnTransactionsTable);
-  const todayEntryDB: Instance = bind(cctpDayDataDB);
-  const weekEntryDB: Instance = bind(cctpWeekDataDB);
-  const monthEntryDB: Instance = bind(cctpMonthDataDB);
-  const yearEntryDB: Instance = bind(cctpYearDataDB);
-  const allTimeEntryDB: Instance = bind(cctpAllTimeDB);
-
-  //prettier-ignore
-  try {
-    await updateDailyData(block.chain_id, todayEntryDB, amount, 0, block.block_timestamp);
-    await updateWeeklyData(block.chain_id, weekEntryDB, amount, 0, block.block_timestamp);
-    await updateMonthlyData( block.chain_id, monthEntryDB, amount, 0, block.block_timestamp);
-    await updateYearlyData( block.chain_id, yearEntryDB, amount, 0, block.block_timestamp);
-    await updateAllTimeData(block.chain_id, allTimeEntryDB, amount, 0);
-  } catch (error) {
-    console.log(error);
-  }
 
   let burntransaction: IburnTransactionsTable = await burntransactionDB.findOne(
     {
@@ -88,4 +63,19 @@ export const DepositForBurnHandler = async (
     destinationTokenMessenger: destinationTokenMessenger.toString(),
     destinationCaller: destinationCaller.toString(),
   });
+
+  const mintDB: Instance = bind(mintTransactionsTable);
+  const dstTx: ImintTransactionsTable = await mintDB.findOne({
+    id: burnId.toLowerCase(),
+  });
+
+  let feeamount = 0;
+  if (dstTx && dstTx.amount) feeamount = amount - dstTx.amount;
+
+  // prettier-ignore
+  try {
+    await (new Stats(false, block.chain_id, amount, feeamount, block.block_timestamp, bind)).update()
+  } catch (error) {
+    console.log(error);
+  }
 };

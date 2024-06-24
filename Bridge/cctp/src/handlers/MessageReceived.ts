@@ -6,35 +6,24 @@ import {
 } from "@blockflow-labs/utils";
 
 import {
+  FeeInfo,
+  IFeeInfo,
   attestationTable,
   IattestationTable,
   mintTransactionsTable,
   ImintTransactionsTable,
   burnTransactionsTable,
-  FeeInfo,
-  IFeeInfo,
   IburnTransactionsTable,
-  cctpDayDataDB,
-  cctpWeekDataDB,
-  cctpMonthDataDB,
-  cctpYearDataDB,
-  cctpAllTimeDB,
 } from "../types/schema";
 import {
+  chainIdToDomain,
+  domainToChainId,
   MESSAGE_RECEIVE_SIG,
   decodeReceiveMessage,
   decodeMintAndWithdraw,
   MINT_AND_WITHDRAW_TOPIC0,
-  chainIdToDomain,
-  domainToChainId,
 } from "../utils/helper";
-import {
-  updateDailyData,
-  updateWeeklyData,
-  updateMonthlyData,
-  updateYearlyData,
-  updateAllTimeData,
-} from "../utils/tracking";
+import { Stats } from "../utils/tracking";
 
 /**
  * @dev Event::MessageReceived(address caller, uint32 sourceDomain, uint64 nonce, bytes32 sender, bytes messageBody)
@@ -46,20 +35,14 @@ export const MessageReceivedHandler = async (
   bind: IBind,
   secrets: ISecrets
 ) => {
-  // Implement your event handler logic for MessageReceived here
+  // Implement your event handler logic for MessageReceived here 163201_10_1
   const { event, transaction, block, log } = context;
   const { caller, sourceDomain, nonce, sender, messageBody } = event;
 
   const srcChainId = domainToChainId[sourceDomain];
   const feeinUSDId = block.chain_id;
 
-  const todayEntryDB: Instance = bind(cctpDayDataDB);
-  const weekEntryDB: Instance = bind(cctpWeekDataDB);
-  const monthEntryDB: Instance = bind(cctpMonthDataDB);
-  const yearEntryDB: Instance = bind(cctpYearDataDB);
-  const allTimeEntryDB: Instance = bind(cctpAllTimeDB);
-
-  let amountDestination = "";
+  let amountDestination = "-1";
   let attestationdata = "";
 
   const isMintAndWithdraw = transaction.logs
@@ -123,33 +106,16 @@ export const MessageReceivedHandler = async (
   });
 
   const burnDB: Instance = bind(burnTransactionsTable);
-  const srcTx: IburnTransactionsTable = await burnDB.findOne({});
-  const amountSource = srcTx.amount;
-
-  const feeamount = amountSource - amount;
-
-  const FeeInfoDB: Instance = bind(FeeInfo);
-  let feeinfo: IFeeInfo = await FeeInfoDB.findOne({
-    id: feeinUSDId,
+  const srcTx: IburnTransactionsTable = await burnDB.findOne({
+    id: mintId.toLowerCase(),
   });
 
-  if (feeinfo) {
-    feeinfo.feeInUSDC += feeamount;
-
-    await FeeInfoDB.save(feeinfo);
-  } else
-    feeinfo = await FeeInfoDB.create({
-      id: feeinUSDId,
-      feeInUSDC: feeamount,
-    });
+  let feeamount = 0;
+  if (srcTx && srcTx.amount) feeamount = srcTx.amount - amount;
 
   // prettier-ignore
   try {
-    await updateDailyData( block.chain_id, todayEntryDB, amount, feeamount, block.block_timestamp);
-    await updateWeeklyData( block.chain_id, weekEntryDB, amount, feeamount, block.block_timestamp);
-    await updateMonthlyData( block.chain_id, monthEntryDB, amount, feeamount, block.block_timestamp);
-    await updateYearlyData( block.chain_id, yearEntryDB, amount, feeamount, block.block_timestamp);
-    await updateAllTimeData(block.chain_id, allTimeEntryDB, amount, feeamount);
+    await (new Stats(true, block.chain_id, amount, feeamount, block.block_timestamp, bind)).update()
   } catch (error) {
     console.log(error);
   }
